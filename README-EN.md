@@ -182,6 +182,12 @@ For private VPS deployments where the UI should be reachable only inside Tailsca
 
 - [Tailnet Docker deployment guide](./docs/operations/mirofish-tailnet-docker-deployment.md)
 
+This guide uses a production-oriented runtime:
+
+- frontend built with Vite and served by nginx
+- backend served by gunicorn
+- no direct dependency on `npm run dev` in production
+
 ### MCP Development
 
 For building an MCP server on top of the backend API, see:

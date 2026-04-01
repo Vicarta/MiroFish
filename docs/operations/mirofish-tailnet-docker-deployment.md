@@ -16,19 +16,27 @@
 - env file: `deploy/.env` on the server
 - persistent data:
   - `/home/mirofish/apps/mirofish/data/uploads`
+  - `/home/mirofish/apps/mirofish/data/logs`
 - host binds:
-  - `127.0.0.1:13000 -> 3000`
+  - `127.0.0.1:13000 -> 80`
   - `127.0.0.1:15001 -> 5001`
 - Tailscale Serve:
   - `tailscale serve --bg --https=13000 http://127.0.0.1:13000`
 
-## Why This Layout
+## Runtime Model
 
-The upstream Docker setup publishes `3000` and `5001` directly. For an internal deployment, loopback-only binds are safer:
+This deployment replaces the upstream single dev container with two production-oriented services:
+
+- `frontend`: static Vite build served by nginx
+- `backend`: Flask app served by gunicorn
+
+The upstream Docker setup publishes `3000` and `5001` directly and runs `npm run dev`. For an internal deployment, loopback-only binds plus a production runtime are safer:
 
 - the UI remains inaccessible from the public internet;
 - Tailscale acts as the only exposure layer;
 - the backend API can stay private even if the UI is shared within the tailnet.
+- the frontend no longer depends on Vite dev server;
+- the backend no longer depends on Flask debug server.
 
 ## Required Secrets
 
@@ -52,19 +60,25 @@ Without valid LLM and Zep credentials, the UI can load but graph build, persona 
 1. Copy deployment files to the server.
 2. Create `data/uploads`.
 3. Create `.env` with production values and set `chmod 600`.
-4. Validate the compose config:
+4. Create persistent directories:
+
+```bash
+mkdir -p data/uploads data/logs
+```
+
+5. Validate the compose config:
 
 ```bash
 sudo docker compose -f deploy/docker-compose.tailnet.yml --env-file deploy/.env config
 ```
 
-5. Start the stack:
+6. Build and start the stack:
 
 ```bash
-sudo docker compose -f deploy/docker-compose.tailnet.yml --env-file deploy/.env up -d
+sudo docker compose -f deploy/docker-compose.tailnet.yml --env-file deploy/.env up -d --build
 ```
 
-6. Publish the UI only to the tailnet:
+7. Publish the UI only to the tailnet:
 
 ```bash
 sudo tailscale serve --bg --https=13000 http://127.0.0.1:13000
@@ -100,18 +114,20 @@ Expected UI URL:
 
 - `https://<your-tailnet-node>:13000/`
 
-## Known Limitation In Upstream Image
+## Why This Is Safer Than Upstream Docker
 
-The upstream Docker image currently starts `npm run dev`, which means:
+The upstream Docker image starts `npm run dev`, which means:
 
 - Vite dev server for frontend
 - Flask debug server for backend
 
-This is acceptable for internal evaluation deployments, but it is not a production-grade runtime. A safer long-term path is to replace it with:
+This deployment replaces that with:
 
-- a built frontend served by nginx
-- a backend served by gunicorn
-- explicit healthchecks and pinned image versions
+- prebuilt frontend assets served by nginx
+- gunicorn for backend
+- explicit healthchecks
+- split services with clearer failure domains
+- loopback-only port publishing for both UI and API
 
 ## Rollback
 
