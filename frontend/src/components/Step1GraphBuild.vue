@@ -124,6 +124,11 @@
           <p class="description">
             Using the generated ontology, the system chunks the documents, calls Zep to build the knowledge graph, extracts entities and relationships, and assembles temporal memory plus community summaries.
           </p>
+
+          <div v-if="buildErrorSummary" class="error-banner">
+            <div class="error-label">BUILD FAILED</div>
+            <p class="error-copy">{{ buildErrorSummary }}</p>
+          </div>
           
           <!-- Stats Cards -->
           <div class="stats-grid">
@@ -252,6 +257,19 @@ const graphStats = computed(() => {
   const edges = props.graphData?.edge_count || props.graphData?.edges?.length || 0
   const types = props.projectData?.ontology?.entity_types?.length || 0
   return { nodes, edges, types }
+})
+
+const buildErrorSummary = computed(() => {
+  if (props.projectData?.status !== 'failed' || !props.projectData?.error) {
+    return ''
+  }
+
+  const message = props.projectData.error
+  if (message.includes('status_code: 401') && message.toLowerCase().includes('unauthorized')) {
+    return 'Zep rejected the graph build request with 401 unauthorized. Update ZEP_API_KEY in Settings and retry the build.'
+  }
+
+  return message.split('\n')[0].trim()
 })
 
 const formatDate = (dateStr) => {
@@ -569,6 +587,29 @@ watch(() => props.systemLogs.length, () => {
 }
 
 /* Step 02 Stats */
+.error-banner {
+  border: 1px solid rgba(196, 82, 53, 0.24);
+  background: rgba(196, 82, 53, 0.08);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border-radius: 6px;
+}
+
+.error-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: #C45235;
+  margin-bottom: 8px;
+}
+
+.error-copy {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #4A1E12;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
