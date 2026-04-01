@@ -4,6 +4,9 @@
     <nav class="navbar">
       <div class="nav-brand">MIROFISH</div>
       <div class="nav-links">
+        <router-link to="/settings" class="settings-link">
+          Settings
+        </router-link>
         <a href="https://github.com/666ghj/MiroFish" target="_blank" class="github-link">
           Visit our GitHub repository <span class="arrow">↗</span>
         </a>
@@ -351,6 +354,28 @@ const startSimulation = () => {
 .nav-links {
   display: flex;
   align-items: center;
+  gap: 16px;
+}
+
+.settings-link {
+  color: var(--black);
+  background: var(--white);
+  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--black);
+  padding: 8px 12px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.settings-link:hover {
+  background: var(--black);
+  color: var(--white);
 }
 
 .github-link {

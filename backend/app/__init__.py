@@ -15,9 +15,34 @@ from flask_cors import CORS
 from .config import Config
 from .utils.logger import setup_logger, get_logger
 
+SENSITIVE_KEYS = {
+    'llm_api_key',
+    'zep_api_key',
+    'authorization',
+    'api_key',
+    'secret',
+    'token',
+}
+
+
+def _redact_payload(payload):
+    """Redact secrets before writing request payloads to logs."""
+    if isinstance(payload, dict):
+        redacted = {}
+        for key, value in payload.items():
+            if any(marker in str(key).lower() for marker in SENSITIVE_KEYS):
+                redacted[key] = '***REDACTED***'
+            else:
+                redacted[key] = _redact_payload(value)
+        return redacted
+    if isinstance(payload, list):
+        return [_redact_payload(item) for item in payload]
+    return payload
+
 
 def create_app(config_class=Config):
     """Flask应用工厂函数"""
+    config_class.reload(force=True)
     app = Flask(__name__)
     app.config.from_object(config_class)
     
@@ -51,10 +76,11 @@ def create_app(config_class=Config):
     # 请求日志中间件
     @app.before_request
     def log_request():
+        Config.reload()
         logger = get_logger('mirofish.request')
         logger.debug(f"请求: {request.method} {request.path}")
         if request.content_type and 'json' in request.content_type:
-            logger.debug(f"请求体: {request.get_json(silent=True)}")
+            logger.debug(f"请求体: {_redact_payload(request.get_json(silent=True))}")
     
     @app.after_request
     def log_response(response):
@@ -63,10 +89,11 @@ def create_app(config_class=Config):
         return response
     
     # 注册蓝图
-    from .api import graph_bp, simulation_bp, report_bp
+    from .api import graph_bp, simulation_bp, report_bp, settings_bp
     app.register_blueprint(graph_bp, url_prefix='/api/graph')
     app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
     app.register_blueprint(report_bp, url_prefix='/api/report')
+    app.register_blueprint(settings_bp, url_prefix='/api/settings')
     
     # 健康检查
     @app.route('/health')
@@ -77,4 +104,3 @@ def create_app(config_class=Config):
         logger.info("MiroFish Backend 启动完成")
     
     return app
-
