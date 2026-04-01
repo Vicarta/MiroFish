@@ -1,0 +1,12 @@
+services:
+  mirofish:
+    image: ghcr.io/666ghj/mirofish:latest
+    container_name: mirofish
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:${MIROFISH_UI_PORT:-13000}:3000"
+      - "127.0.0.1:${MIROFISH_API_PORT:-15001}:5001"
+    volumes:
+      - ./data/uploads:/app/backend/uploads

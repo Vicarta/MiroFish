@@ -176,6 +176,18 @@ Reads `.env` from root directory by default, maps ports `3000 (frontend) / 5001 
 
 > Mirror address for faster pulling is provided as comments in `docker-compose.yml`, replace if needed.
 
+### Internal Tailnet Deployment
+
+For private VPS deployments where the UI should be reachable only inside Tailscale, see:
+
+- [Tailnet Docker deployment guide](./docs/operations/mirofish-tailnet-docker-deployment.md)
+
+### MCP Development
+
+For building an MCP server on top of the backend API, see:
+
+- [MCP development plan](./docs/mcp/mirofish-mcp-development-plan.md)
+
 ## 📬 Join the Conversation
 
 <div align="center">
