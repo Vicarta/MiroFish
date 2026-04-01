@@ -673,6 +673,19 @@ const updatePhaseByStatus = (status) => {
   }
 }
 
+const handleProjectFailure = (project) => {
+  if (!project || project.status !== 'failed') {
+    return false
+  }
+
+  projectData.value = project
+  stopPolling()
+  stopGraphPolling()
+  buildProgress.value = null
+  error.value = project.error || 'Graph build failed'
+  return true
+}
+
 // 开始构建Graph
 const startBuildGraph = async () => {
   try {
@@ -741,7 +754,11 @@ const fetchGraphData = async () => {
   try {
     // 先获取项目信息以获取 graph_id
     const projectResponse = await getProject(currentProjectId.value)
-    
+
+    if (projectResponse.success && handleProjectFailure(projectResponse.data)) {
+      return
+    }
+
     if (projectResponse.success && projectResponse.data.graph_id) {
       const graphId = projectResponse.data.graph_id
       projectData.value = projectResponse.data
@@ -833,6 +850,14 @@ const pollTaskStatus = async (taskId) => {
     }
   } catch (err) {
     console.error('Poll task error:', err)
+    try {
+      const projectResponse = await getProject(currentProjectId.value)
+      if (projectResponse.success && handleProjectFailure(projectResponse.data)) {
+        return
+      }
+    } catch (projectErr) {
+      console.error('Project fallback poll error:', projectErr)
+    }
   }
 }
 

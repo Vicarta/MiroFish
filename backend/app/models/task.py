@@ -1,14 +1,15 @@
-"""
-任务状态管理
-用于跟踪长时间运行的任务（如图谱构建）
-"""
+"""Task status management with filesystem-backed persistence."""
 
-import uuid
+import json
+import os
 import threading
+import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Any, Optional
-from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
+
+from ..config import Config
 
 
 class TaskStatus(str, Enum):
@@ -50,6 +51,27 @@ class Task:
             "metadata": self.metadata,
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Task":
+        """Rebuild a Task instance from persisted JSON data."""
+        status = data.get("status", TaskStatus.PENDING)
+        if isinstance(status, str):
+            status = TaskStatus(status)
+
+        return cls(
+            task_id=data["task_id"],
+            task_type=data.get("task_type", "unknown"),
+            status=status,
+            created_at=datetime.fromisoformat(data["created_at"]),
+            updated_at=datetime.fromisoformat(data["updated_at"]),
+            progress=data.get("progress", 0),
+            message=data.get("message", ""),
+            result=data.get("result"),
+            error=data.get("error"),
+            metadata=data.get("metadata") or {},
+            progress_detail=data.get("progress_detail") or {},
+        )
+
 
 class TaskManager:
     """
@@ -68,7 +90,33 @@ class TaskManager:
                     cls._instance = super().__new__(cls)
                     cls._instance._tasks: Dict[str, Task] = {}
                     cls._instance._task_lock = threading.Lock()
+                    cls._instance._tasks_dir = os.path.join(Config.UPLOAD_FOLDER, 'tasks')
+                    os.makedirs(cls._instance._tasks_dir, exist_ok=True)
         return cls._instance
+
+    def _get_task_path(self, task_id: str) -> str:
+        """Return the filesystem path for a task JSON document."""
+        return os.path.join(self._tasks_dir, f"{task_id}.json")
+
+    def _save_task(self, task: Task) -> None:
+        """Persist task state atomically so all workers can read it."""
+        path = self._get_task_path(task.task_id)
+        temp_path = f"{path}.tmp"
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(task.to_dict(), f, ensure_ascii=False, indent=2)
+        os.replace(temp_path, path)
+
+    def _load_task_from_disk(self, task_id: str) -> Optional[Task]:
+        """Load a task from disk if it exists."""
+        path = self._get_task_path(task_id)
+        if not os.path.exists(path):
+            return None
+
+        with open(path, 'r', encoding='utf-8') as f:
+            task = Task.from_dict(json.load(f))
+
+        self._tasks[task_id] = task
+        return task
     
     def create_task(self, task_type: str, metadata: Optional[Dict] = None) -> str:
         """
@@ -95,13 +143,17 @@ class TaskManager:
         
         with self._task_lock:
             self._tasks[task_id] = task
-        
+            self._save_task(task)
+
         return task_id
     
     def get_task(self, task_id: str) -> Optional[Task]:
         """获取任务"""
         with self._task_lock:
-            return self._tasks.get(task_id)
+            task = self._tasks.get(task_id)
+            if task:
+                return task
+            return self._load_task_from_disk(task_id)
     
     def update_task(
         self,
@@ -126,7 +178,7 @@ class TaskManager:
             progress_detail: 详细进度信息
         """
         with self._task_lock:
-            task = self._tasks.get(task_id)
+            task = self._tasks.get(task_id) or self._load_task_from_disk(task_id)
             if task:
                 task.updated_at = datetime.now()
                 if status is not None:
@@ -141,6 +193,7 @@ class TaskManager:
                     task.error = error
                 if progress_detail is not None:
                     task.progress_detail = progress_detail
+                self._save_task(task)
     
     def complete_task(self, task_id: str, result: Dict):
         """标记Task completed"""
@@ -164,10 +217,20 @@ class TaskManager:
     def list_tasks(self, task_type: Optional[str] = None) -> list:
         """列出任务"""
         with self._task_lock:
-            tasks = list(self._tasks.values())
+            tasks: Dict[str, Task] = dict(self._tasks)
+            if os.path.exists(self._tasks_dir):
+                for filename in os.listdir(self._tasks_dir):
+                    if not filename.endswith('.json'):
+                        continue
+                    task_id = filename[:-5]
+                    if task_id not in tasks:
+                        task = self._load_task_from_disk(task_id)
+                        if task:
+                            tasks[task_id] = task
+            task_list = list(tasks.values())
             if task_type:
-                tasks = [t for t in tasks if t.task_type == task_type]
-            return [t.to_dict() for t in sorted(tasks, key=lambda x: x.created_at, reverse=True)]
+                task_list = [t for t in task_list if t.task_type == task_type]
+            return sorted(task_list, key=lambda x: x.created_at, reverse=True)
     
     def cleanup_old_tasks(self, max_age_hours: int = 24):
         """清理旧任务"""
@@ -181,4 +244,6 @@ class TaskManager:
             ]
             for tid in old_ids:
                 del self._tasks[tid]
-
+                path = self._get_task_path(tid)
+                if os.path.exists(path):
+                    os.remove(path)

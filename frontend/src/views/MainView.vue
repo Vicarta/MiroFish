@@ -264,8 +264,21 @@ const updatePhaseByStatus = (status) => {
     case 'ontology_generated': currentPhase.value = 0; break;
     case 'graph_building': currentPhase.value = 1; break;
     case 'graph_completed': currentPhase.value = 2; break;
-    case 'failed': error.value = 'Project failed'; break;
+    case 'failed': error.value = projectData.value?.error || 'Project failed'; break;
   }
+}
+
+const handleProjectFailure = (project) => {
+  if (!project || project.status !== 'failed') {
+    return false
+  }
+
+  projectData.value = project
+  stopPolling()
+  stopGraphPolling()
+  buildProgress.value = null
+  error.value = project.error || 'Graph build failed'
+  return true
 }
 
 const startBuildGraph = async () => {
@@ -299,6 +312,10 @@ const fetchGraphData = async () => {
   try {
     // Refresh project info to check for graph_id
     const projRes = await getProject(currentProjectId.value)
+    if (projRes.success && handleProjectFailure(projRes.data)) {
+      return
+    }
+
     if (projRes.success && projRes.data.graph_id) {
       const gRes = await getGraphData(projRes.data.graph_id)
       if (gRes.success) {
@@ -351,6 +368,14 @@ const pollTaskStatus = async (taskId) => {
     }
   } catch (e) {
     console.error(e)
+    try {
+      const projRes = await getProject(currentProjectId.value)
+      if (projRes.success && handleProjectFailure(projRes.data)) {
+        return
+      }
+    } catch (projectErr) {
+      console.error(projectErr)
+    }
   }
 }
 
