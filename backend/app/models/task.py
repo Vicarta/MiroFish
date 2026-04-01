@@ -143,21 +143,21 @@ class TaskManager:
                     task.progress_detail = progress_detail
     
     def complete_task(self, task_id: str, result: Dict):
-        """标记任务完成"""
+        """标记Task completed"""
         self.update_task(
             task_id,
             status=TaskStatus.COMPLETED,
             progress=100,
-            message="任务完成",
+            message="Task completed",
             result=result
         )
     
     def fail_task(self, task_id: str, error: str):
-        """标记任务失败"""
+        """标记Task failed"""
         self.update_task(
             task_id,
             status=TaskStatus.FAILED,
-            message="任务失败",
+            message="Task failed",
             error=error
         )
     
