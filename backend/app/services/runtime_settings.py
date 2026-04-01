@@ -6,6 +6,7 @@ from typing import Dict, Any
 from dotenv import dotenv_values
 
 from ..config import Config
+from .settings_validation import validate_runtime_settings
 
 EDITABLE_FIELDS = (
     'LLM_API_KEY',
@@ -76,6 +77,11 @@ def update_runtime_settings(updates: Dict[str, Any]) -> Dict[str, Any]:
             for key, value in dotenv_values(env_path).items()
             if value is not None
         }
+
+    candidate_settings = dict(existing)
+    candidate_settings.update(filtered_updates)
+
+    validate_runtime_settings(candidate_settings, filtered_updates.keys())
 
     existing.update(filtered_updates)
 

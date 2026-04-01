@@ -10,7 +10,7 @@
         <div class="eyebrow">Runtime configuration</div>
         <h1 class="page-title">Settings</h1>
         <p class="page-copy">
-          Configure the live deployment without exposing stored secret values in the browser. Secret fields below are always blank on load.
+          Configure the live deployment without exposing stored secret values in the browser. Secret fields below are always blank on load, and new credentials are validated before they are written.
         </p>
       </section>
 
@@ -48,7 +48,7 @@
             <div class="form-eyebrow">Write-only update</div>
             <h2 class="form-title">Rotate or add credentials</h2>
           </div>
-          <div v-if="loading" class="form-badge">Saving…</div>
+          <div v-if="loading" class="form-badge">Validating…</div>
         </div>
 
         <div v-if="successMessage" class="notice success">{{ successMessage }}</div>
@@ -119,7 +119,7 @@
 
           <div class="actions">
             <button class="primary-action" type="submit" :disabled="loading">
-              {{ loading ? 'Saving settings…' : 'Save settings' }}
+              {{ loading ? 'Validate and save…' : 'Validate and save settings' }}
             </button>
           </div>
         </form>
@@ -211,10 +211,10 @@ const handleSubmit = async () => {
     })
 
     applySettings(response.data.status)
-    successMessage.value = 'Settings saved. Stored secret values remain hidden and blank in the UI.'
+    successMessage.value = 'Settings validated and saved. Stored secret values remain hidden and blank in the UI.'
     await clearSecretInputs()
   } catch (error) {
-    errorMessage.value = error.response?.data?.error || error.message || 'Failed to save settings.'
+    errorMessage.value = error.response?.data?.error || error.message || 'Failed to validate settings.'
   } finally {
     loading.value = false
   }
