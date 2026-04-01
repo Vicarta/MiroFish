@@ -59,10 +59,18 @@
             <span class="field-label">LLM API key</span>
             <input
               v-model="form.llm_api_key"
+              ref="llmApiKeyInput"
               class="field-input"
               type="password"
-              autocomplete="new-password"
+              name="runtime-llm-api-key"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              data-1p-ignore="true"
+              data-lpignore="true"
               placeholder="Enter a new LLM API key to add or replace the stored value"
+              @focus="clearSecretField('llm_api_key')"
             />
             <span class="field-hint">Leave blank to keep the currently stored key.</span>
           </label>
@@ -71,10 +79,18 @@
             <span class="field-label">Zep API key</span>
             <input
               v-model="form.zep_api_key"
+              ref="zepApiKeyInput"
               class="field-input"
               type="password"
-              autocomplete="new-password"
+              name="runtime-zep-api-key"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              data-1p-ignore="true"
+              data-lpignore="true"
               placeholder="Enter a new Zep API key to add or replace the stored value"
+              @focus="clearSecretField('zep_api_key')"
             />
             <span class="field-hint">Leave blank to keep the currently stored key.</span>
           </label>
@@ -113,12 +129,14 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { nextTick, onMounted, reactive, ref } from 'vue'
 import { getSettings, updateSettings } from '../api/settings'
 
 const loading = ref(false)
 const successMessage = ref('')
 const errorMessage = ref('')
+const llmApiKeyInput = ref(null)
+const zepApiKeyInput = ref(null)
 
 const settings = reactive({
   llm_api_key_configured: false,
@@ -141,6 +159,24 @@ const syncFormFromSettings = () => {
   form.llm_model_name = settings.llm_model_name || ''
 }
 
+const clearSecretField = (fieldName) => {
+  form[fieldName] = ''
+}
+
+const clearSecretInputs = async () => {
+  await nextTick()
+
+  if (llmApiKeyInput.value) {
+    llmApiKeyInput.value.value = ''
+  }
+  if (zepApiKeyInput.value) {
+    zepApiKeyInput.value.value = ''
+  }
+
+  form.llm_api_key = ''
+  form.zep_api_key = ''
+}
+
 const applySettings = (payload) => {
   settings.llm_api_key_configured = Boolean(payload.llm_api_key_configured)
   settings.zep_api_key_configured = Boolean(payload.zep_api_key_configured)
@@ -155,8 +191,9 @@ const loadSettings = async () => {
   try {
     const response = await getSettings()
     applySettings(response.data)
+    await clearSecretInputs()
   } catch (error) {
-    errorMessage.value = error.message || 'Failed to load settings.'
+    errorMessage.value = error.response?.data?.error || error.message || 'Failed to load settings.'
   }
 }
 
@@ -175,8 +212,9 @@ const handleSubmit = async () => {
 
     applySettings(response.data.status)
     successMessage.value = 'Settings saved. Stored secret values remain hidden and blank in the UI.'
+    await clearSecretInputs()
   } catch (error) {
-    errorMessage.value = error.message || 'Failed to save settings.'
+    errorMessage.value = error.response?.data?.error || error.message || 'Failed to save settings.'
   } finally {
     loading.value = false
   }
@@ -184,6 +222,9 @@ const handleSubmit = async () => {
 
 onMounted(() => {
   loadSettings()
+  setTimeout(() => {
+    clearSecretInputs()
+  }, 300)
 })
 </script>
 

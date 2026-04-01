@@ -18,6 +18,8 @@ SECRET_FIELDS = {'LLM_API_KEY', 'ZEP_API_KEY'}
 
 
 def _normalize_value(value: Any) -> str:
+    if value is None:
+        return ''
     return str(value).strip()
 
 
