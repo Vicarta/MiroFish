@@ -163,7 +163,8 @@ class TaskManager:
         message: Optional[str] = None,
         result: Optional[Dict] = None,
         error: Optional[str] = None,
-        progress_detail: Optional[Dict] = None
+        progress_detail: Optional[Dict] = None,
+        metadata: Optional[Dict] = None
     ):
         """
         更新任务状态
@@ -176,6 +177,7 @@ class TaskManager:
             result: 结果
             error: 错误信息
             progress_detail: 详细进度信息
+            metadata: 额外元数据
         """
         with self._task_lock:
             task = self._tasks.get(task_id) or self._load_task_from_disk(task_id)
@@ -193,6 +195,8 @@ class TaskManager:
                     task.error = error
                 if progress_detail is not None:
                     task.progress_detail = progress_detail
+                if metadata is not None:
+                    task.metadata = metadata
                 self._save_task(task)
     
     def complete_task(self, task_id: str, result: Dict):

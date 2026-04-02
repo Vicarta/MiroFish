@@ -31,6 +31,12 @@ def _is_zep_rate_limit(exc: Exception) -> bool:
     return 'status_code: 429' in text or 'rate limit exceeded' in text
 
 
+def _is_zep_episode_usage_limit(exc: Exception) -> bool:
+    text = str(exc).lower()
+    status_code = getattr(exc, 'status_code', None)
+    return status_code == 403 and 'episode usage limit' in text
+
+
 def _normalize_graph_build_error(exc: Exception) -> str:
     """Convert raw backend/Zep exceptions into concise user-facing errors."""
     message = str(exc)
@@ -40,6 +46,12 @@ def _normalize_graph_build_error(exc: Exception) -> str:
         return (
             "Zep FREE plan rate limit was exceeded during GraphRAG build. "
             "Wait for the cooldown window and retry."
+        )
+
+    if _is_zep_episode_usage_limit(exc):
+        return (
+            "Zep rejected this GraphRAG build because the account is over its episode usage limit. "
+            "Reduce the document set or upgrade the Zep plan before retrying."
         )
 
     if "episodes cannot contain more than 20 items" in lowered:

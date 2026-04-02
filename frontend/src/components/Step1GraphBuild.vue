@@ -271,6 +271,9 @@ const buildErrorSummary = computed(() => {
   if (message.includes('status_code: 429') || message.toLowerCase().includes('rate limit exceeded')) {
     return 'Zep FREE plan rate limit was exceeded during GraphRAG build. Wait for the cooldown window and retry.'
   }
+  if (message.toLowerCase().includes('episode usage limit')) {
+    return 'Zep rejected this GraphRAG build because the account is over its episode usage limit. Reduce the document set or upgrade the Zep plan before retrying.'
+  }
   if (message.toLowerCase().includes('episodes cannot contain more than 20 items')) {
     return 'GraphRAG build sent a batch larger than Zep allows. The server has been updated; retry the graph build.'
   }
