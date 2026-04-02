@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from zep_cloud import InternalServerError
+from zep_cloud.core.api_error import ApiError
 from zep_cloud.client import Zep
 
 from .logger import get_logger
@@ -19,8 +20,25 @@ logger = get_logger('mirofish.zep_paging')
 
 _DEFAULT_PAGE_SIZE = 100
 _MAX_NODES = 2000
-_DEFAULT_MAX_RETRIES = 3
+_DEFAULT_MAX_RETRIES = 5
 _DEFAULT_RETRY_DELAY = 2.0  # seconds, doubles each retry
+
+
+def _api_error_status(exc: Exception) -> int | None:
+    """Best-effort extraction of HTTP status from Zep client errors."""
+    return getattr(exc, "status_code", None)
+
+
+def _api_error_retry_delay(exc: Exception, fallback: float) -> float:
+    """Use Retry-After when present, otherwise fall back to exponential backoff."""
+    headers = getattr(exc, "headers", None) or {}
+    retry_after = headers.get("retry-after") or headers.get("Retry-After")
+    if retry_after is None:
+        return fallback
+    try:
+        return max(float(retry_after), fallback)
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _fetch_page_with_retry(
@@ -41,14 +59,20 @@ def _fetch_page_with_retry(
     for attempt in range(max_retries):
         try:
             return api_call(*args, **kwargs)
-        except (ConnectionError, TimeoutError, OSError, InternalServerError) as e:
+        except (ConnectionError, TimeoutError, OSError, InternalServerError, ApiError) as e:
             last_exception = e
+            status_code = _api_error_status(e)
+            should_retry = status_code == 429 or status_code is None
+            if not should_retry:
+                raise
+
+            current_delay = _api_error_retry_delay(e, delay)
             if attempt < max_retries - 1:
                 logger.warning(
-                    f"Zep {page_description} attempt {attempt + 1} failed: {str(e)[:100]}, retrying in {delay:.1f}s..."
+                    f"Zep {page_description} attempt {attempt + 1} failed: {str(e)[:100]}, retrying in {current_delay:.1f}s..."
                 )
-                time.sleep(delay)
-                delay *= 2
+                time.sleep(current_delay)
+                delay = max(delay * 2, current_delay * 2)
             else:
                 logger.error(f"Zep {page_description} failed after {max_retries} attempts: {str(e)}")
 

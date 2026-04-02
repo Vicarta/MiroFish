@@ -7,6 +7,7 @@ import os
 import traceback
 import threading
 from flask import request, jsonify
+from zep_cloud.core.api_error import ApiError
 
 from . import graph_bp
 from ..config import Config
@@ -20,6 +21,14 @@ from ..models.project import ProjectManager, ProjectStatus
 
 # 获取日志器
 logger = get_logger('mirofish.api')
+
+
+def _is_zep_rate_limit(exc: Exception) -> bool:
+    status_code = getattr(exc, 'status_code', None)
+    if status_code == 429:
+        return True
+    text = str(exc).lower()
+    return 'status_code: 429' in text or 'rate limit exceeded' in text
 
 
 def allowed_file(filename: str) -> bool:
@@ -434,7 +443,7 @@ def build_graph():
         # 创建异步任务
         task_manager = TaskManager()
         task_id = task_manager.create_task(
-            f"构建图谱: {graph_name}",
+            f"Build graph: {graph_name}",
             metadata={
                 "project_id": project_id,
                 "stage": "graph_build",
@@ -455,7 +464,7 @@ def build_graph():
                 task_manager.update_task(
                     task_id, 
                     status=TaskStatus.PROCESSING,
-                    message="初始化图谱构建服务..."
+                    message="Initializing GraphRAG build..."
                 )
                 
                 # 创建图谱构建服务
@@ -464,7 +473,7 @@ def build_graph():
                 # 分块
                 task_manager.update_task(
                     task_id,
-                    message="文本分块中...",
+                    message="Chunking source documents...",
                     progress=5
                 )
                 chunks = TextProcessor.split_text(
@@ -477,7 +486,7 @@ def build_graph():
                 # 创建图谱
                 task_manager.update_task(
                     task_id,
-                    message="创建Zep图谱...",
+                    message="Creating Zep graph...",
                     progress=10
                 )
                 graph_id = builder.create_graph(name=graph_name)
@@ -489,7 +498,7 @@ def build_graph():
                 # 设置本体
                 task_manager.update_task(
                     task_id,
-                    message="设置本体定义...",
+                    message="Configuring ontology schema...",
                     progress=15
                 )
                 builder.set_ontology(graph_id, ontology)
@@ -505,7 +514,7 @@ def build_graph():
                 
                 task_manager.update_task(
                     task_id,
-                    message=f"开始添加 {total_chunks} 个文本块...",
+                    message=f"Uploading {total_chunks} text chunks to Zep...",
                     progress=15
                 )
                 
@@ -519,7 +528,7 @@ def build_graph():
                 # 等待Zep处理完成（查询每个episode的processed状态）
                 task_manager.update_task(
                     task_id,
-                    message="等待Zep处理数据...",
+                    message="Waiting for Zep to process uploaded chunks...",
                     progress=55
                 )
                 
@@ -536,10 +545,27 @@ def build_graph():
                 # 获取图谱数据
                 task_manager.update_task(
                     task_id,
-                    message="获取图谱数据...",
+                    message="Fetching graph summary...",
                     progress=95
                 )
-                graph_data = builder.get_graph_data(graph_id)
+                try:
+                    graph_data = builder.get_graph_data(graph_id)
+                except ApiError as exc:
+                    if not _is_zep_rate_limit(exc):
+                        raise
+
+                    build_logger.warning(
+                        f"[{task_id}] Graph build hit Zep rate limit while fetching final graph data. "
+                        "Marking build complete with partial summary."
+                    )
+                    graph_data = {
+                        "graph_id": graph_id,
+                        "node_count": 0,
+                        "edge_count": 0,
+                        "nodes": [],
+                        "edges": [],
+                        "warning": "Zep rate limit was hit while fetching the final graph snapshot.",
+                    }
                 
                 # 更新项目状态
                 project.status = ProjectStatus.GRAPH_COMPLETED
@@ -553,14 +579,19 @@ def build_graph():
                 task_manager.update_task(
                     task_id,
                     status=TaskStatus.COMPLETED,
-                    message="图谱构建完成",
+                    message=(
+                        "GraphRAG build completed."
+                        if not graph_data.get("warning")
+                        else "GraphRAG build completed, but the final graph snapshot is temporarily rate-limited."
+                    ),
                     progress=100,
                     result={
                         "project_id": project_id,
                         "graph_id": graph_id,
                         "node_count": node_count,
                         "edge_count": edge_count,
-                        "chunk_count": total_chunks
+                        "chunk_count": total_chunks,
+                        "warning": graph_data.get("warning"),
                     }
                 )
                 
@@ -570,13 +601,23 @@ def build_graph():
                 build_logger.debug(traceback.format_exc())
                 
                 project.status = ProjectStatus.FAILED
-                project.error = str(e)
+                if _is_zep_rate_limit(e):
+                    project.error = (
+                        "Zep rate limit exceeded on the FREE plan during GraphRAG build. "
+                        "Wait for the cooldown shown by Zep and retry the graph build."
+                    )
+                else:
+                    project.error = str(e)
                 ProjectManager.save_project(project)
                 
                 task_manager.update_task(
                     task_id,
                     status=TaskStatus.FAILED,
-                    message=f"构建失败: {str(e)}",
+                    message=(
+                        "GraphRAG build failed because Zep rate limit was exceeded."
+                        if _is_zep_rate_limit(e)
+                        else f"GraphRAG build failed: {str(e)}"
+                    ),
                     error=traceback.format_exc()
                 )
         
@@ -659,6 +700,11 @@ def get_graph_data(graph_id: str):
         })
         
     except Exception as e:
+        if _is_zep_rate_limit(e):
+            return jsonify({
+                "success": False,
+                "error": "Zep FREE plan rate limit was exceeded while loading graph data. Wait for the cooldown window and retry."
+            }), 429
         return jsonify({
             "success": False,
             "error": str(e),

@@ -268,6 +268,9 @@ const buildErrorSummary = computed(() => {
   if (message.includes('status_code: 401') && message.toLowerCase().includes('unauthorized')) {
     return 'Zep rejected the graph build request with 401 unauthorized. Update ZEP_API_KEY in Settings and retry the build.'
   }
+  if (message.includes('status_code: 429') || message.toLowerCase().includes('rate limit exceeded')) {
+    return 'Zep FREE plan rate limit was exceeded during GraphRAG build. Wait for the cooldown window and retry.'
+  }
 
   return message.split('\n')[0].trim()
 })
