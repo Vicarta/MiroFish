@@ -1,4 +1,4 @@
-import service from './index'
+import service, { requestWithRetry } from './index'
 
 /**
  * 生成本体（上传文档和Simulation Requirement）

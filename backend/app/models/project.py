@@ -17,6 +17,7 @@ from ..config import Config
 class ProjectStatus(str, Enum):
     """项目状态"""
     CREATED = "created"              # 刚创建，文件已上传
+    ONTOLOGY_GENERATING = "ontology_generating"  # 本体生成中
     ONTOLOGY_GENERATED = "ontology_generated"  # 本体已生成
     GRAPH_BUILDING = "graph_building"    # 图谱构建中
     GRAPH_COMPLETED = "graph_completed"  # 图谱构建完成
@@ -42,6 +43,7 @@ class Project:
     
     # 图谱信息（接口2完成后填充）
     graph_id: Optional[str] = None
+    ontology_task_id: Optional[str] = None
     graph_build_task_id: Optional[str] = None
     
     # 配置
@@ -65,6 +67,7 @@ class Project:
             "ontology": self.ontology,
             "analysis_summary": self.analysis_summary,
             "graph_id": self.graph_id,
+            "ontology_task_id": self.ontology_task_id,
             "graph_build_task_id": self.graph_build_task_id,
             "simulation_requirement": self.simulation_requirement,
             "chunk_size": self.chunk_size,
@@ -90,6 +93,7 @@ class Project:
             ontology=data.get('ontology'),
             analysis_summary=data.get('analysis_summary'),
             graph_id=data.get('graph_id'),
+            ontology_task_id=data.get('ontology_task_id'),
             graph_build_task_id=data.get('graph_build_task_id'),
             simulation_requirement=data.get('simulation_requirement'),
             chunk_size=data.get('chunk_size', 500),
@@ -302,4 +306,3 @@ class ProjectManager:
             for f in os.listdir(files_dir) 
             if os.path.isfile(os.path.join(files_dir, f))
         ]
-

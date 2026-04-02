@@ -198,6 +198,7 @@ const handleNewProject = async () => {
     loading.value = true
     currentPhase.value = 0
     ontologyProgress.value = { message: 'Uploading and analyzing docs...' }
+    error.value = ''
     addLog('Starting ontology generation: Uploading files...')
     
     const formData = new FormData()
@@ -208,12 +209,18 @@ const handleNewProject = async () => {
     if (res.success) {
       clearPendingUpload()
       currentProjectId.value = res.data.project_id
-      projectData.value = res.data
-      
-      router.replace({ name: 'Process', params: { projectId: res.data.project_id } })
-      ontologyProgress.value = null
-      addLog(`Ontology generated successfully for project ${res.data.project_id}`)
-      await startBuildGraph()
+      projectData.value = { ...res.data }
+
+      await router.replace({ name: 'Process', params: { projectId: res.data.project_id } })
+      ontologyProgress.value = {
+        progress: 0,
+        message: res.data.message || 'Ontology generation started...'
+      }
+      addLog(`Ontology generation started for project ${res.data.project_id}`)
+
+      if (res.data.task_id) {
+        startPollingTask(res.data.task_id)
+      }
     } else {
       error.value = res.error || 'Ontology generation failed'
       addLog(`Error generating ontology: ${error.value}`)
@@ -236,7 +243,11 @@ const loadProject = async () => {
       updatePhaseByStatus(res.data.status)
       addLog(`Project loaded. Status: ${res.data.status}`)
       
-      if (res.data.status === 'ontology_generated' && !res.data.graph_id) {
+      if (res.data.status === 'ontology_generating' && res.data.ontology_task_id) {
+        currentPhase.value = 0
+        ontologyProgress.value = { progress: 0, message: 'Generating ontology...' }
+        startPollingTask(res.data.ontology_task_id)
+      } else if (res.data.status === 'ontology_generated' && !res.data.graph_id) {
         await startBuildGraph()
       } else if (res.data.status === 'graph_building' && res.data.graph_build_task_id) {
         currentPhase.value = 1
@@ -261,6 +272,7 @@ const loadProject = async () => {
 const updatePhaseByStatus = (status) => {
   switch (status) {
     case 'created':
+    case 'ontology_generating':
     case 'ontology_generated': currentPhase.value = 0; break;
     case 'graph_building': currentPhase.value = 1; break;
     case 'graph_completed': currentPhase.value = 2; break;
@@ -285,6 +297,7 @@ const startBuildGraph = async () => {
   try {
     currentPhase.value = 1
     buildProgress.value = { progress: 0, message: 'Starting build...' }
+    ontologyProgress.value = null
     addLog('Initiating graph build...')
     
     const res = await buildGraph({ project_id: currentProjectId.value })
@@ -331,6 +344,7 @@ const fetchGraphData = async () => {
 }
 
 const startPollingTask = (taskId) => {
+  stopPolling()
   pollTaskStatus(taskId)
   pollTimer = setInterval(() => pollTaskStatus(taskId), 2000)
 }
@@ -340,30 +354,56 @@ const pollTaskStatus = async (taskId) => {
     const res = await getTaskStatus(taskId)
     if (res.success) {
       const task = res.data
+      const stage = task.metadata?.stage
+      const isOntologyTask = stage === 'ontology_generation'
+      const isGraphTask = stage === 'graph_build'
       
-      // Log progress message if it changed
-      if (task.message && task.message !== buildProgress.value?.message) {
+      const previousMessage = isOntologyTask
+        ? ontologyProgress.value?.message
+        : buildProgress.value?.message
+
+      if (task.message && task.message !== previousMessage) {
         addLog(task.message)
       }
-      
-      buildProgress.value = { progress: task.progress || 0, message: task.message }
-      
+
+      if (isOntologyTask) {
+        currentPhase.value = 0
+        ontologyProgress.value = { progress: task.progress || 0, message: task.message }
+      } else {
+        currentPhase.value = 1
+        buildProgress.value = { progress: task.progress || 0, message: task.message }
+      }
+
       if (task.status === 'completed') {
-        addLog('Graph build task completed.')
         stopPolling()
-        stopGraphPolling() // Stop polling, do final load
-        currentPhase.value = 2
-        
-        // Final load
         const projRes = await getProject(currentProjectId.value)
-        if (projRes.success && projRes.data.graph_id) {
-            projectData.value = projRes.data
+        if (projRes.success) {
+          projectData.value = projRes.data
+        }
+
+        if (isOntologyTask) {
+          addLog('Ontology generation completed.')
+          ontologyProgress.value = null
+          if (projRes.success && projRes.data.status === 'ontology_generated' && !projRes.data.graph_id) {
+            await startBuildGraph()
+          }
+        } else if (isGraphTask) {
+          addLog('Graph build task completed.')
+          stopGraphPolling()
+          currentPhase.value = 2
+          if (projRes.success && projRes.data.graph_id) {
             await loadGraph(projRes.data.graph_id)
+          }
         }
       } else if (task.status === 'failed') {
         stopPolling()
-        error.value = task.error
-        addLog(`Graph build task failed: ${task.error}`)
+        if (isOntologyTask) {
+          ontologyProgress.value = null
+        } else {
+          buildProgress.value = null
+        }
+        error.value = task.error || task.message || 'Task failed'
+        addLog(`Task failed: ${error.value}`)
       }
     }
   } catch (e) {

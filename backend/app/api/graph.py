@@ -104,6 +104,7 @@ def reset_project(project_id: str):
     else:
         project.status = ProjectStatus.CREATED
     
+    project.ontology_task_id = None
     project.graph_id = None
     project.graph_build_task_id = None
     project.error = None
@@ -213,38 +214,98 @@ def generate_ontology():
         ProjectManager.save_project(project)
         logger.info(f"文本提取完成，共 {len(all_text)} 字符")
         
-        # 生成本体
-        logger.info("调用 LLM 生成本体定义...")
-        generator = OntologyGenerator()
-        ontology = generator.generate(
-            document_texts=document_texts,
-            simulation_requirement=simulation_requirement,
-            additional_context=additional_context if additional_context else None
+        task_manager = TaskManager()
+        task_id = task_manager.create_task(
+            "generate_ontology",
+            metadata={
+                "project_id": project.project_id,
+                "stage": "ontology_generation",
+            },
         )
-        
-        # 保存本体到项目
-        entity_count = len(ontology.get("entity_types", []))
-        edge_count = len(ontology.get("edge_types", []))
-        logger.info(f"本体生成完成: {entity_count} 个实体类型, {edge_count} 个关系类型")
-        
-        project.ontology = {
-            "entity_types": ontology.get("entity_types", []),
-            "edge_types": ontology.get("edge_types", [])
-        }
-        project.analysis_summary = ontology.get("analysis_summary", "")
-        project.status = ProjectStatus.ONTOLOGY_GENERATED
+
+        project.status = ProjectStatus.ONTOLOGY_GENERATING
+        project.ontology_task_id = task_id
+        project.error = None
         ProjectManager.save_project(project)
-        logger.info(f"=== 本体生成完成 === 项目ID: {project.project_id}")
-        
+
+        def ontology_task():
+            task_logger = get_logger('mirofish.ontology')
+            try:
+                task_manager.update_task(
+                    task_id,
+                    status=TaskStatus.PROCESSING,
+                    progress=10,
+                    message="Documents uploaded. Preparing ontology prompt..."
+                )
+
+                task_logger.info(f"[{task_id}] 调用 LLM 生成本体定义...")
+                generator = OntologyGenerator()
+                task_manager.update_task(
+                    task_id,
+                    progress=35,
+                    message="Calling LLM to generate ontology..."
+                )
+                ontology = generator.generate(
+                    document_texts=document_texts,
+                    simulation_requirement=simulation_requirement,
+                    additional_context=additional_context if additional_context else None
+                )
+
+                entity_count = len(ontology.get("entity_types", []))
+                edge_count = len(ontology.get("edge_types", []))
+                task_logger.info(
+                    f"[{task_id}] 本体生成完成: {entity_count} 个实体类型, {edge_count} 个关系类型"
+                )
+
+                project.ontology = {
+                    "entity_types": ontology.get("entity_types", []),
+                    "edge_types": ontology.get("edge_types", [])
+                }
+                project.analysis_summary = ontology.get("analysis_summary", "")
+                project.status = ProjectStatus.ONTOLOGY_GENERATED
+                project.error = None
+                ProjectManager.save_project(project)
+
+                task_manager.complete_task(task_id, {
+                    "project_id": project.project_id,
+                    "project_name": project.name,
+                    "ontology": project.ontology,
+                    "analysis_summary": project.analysis_summary,
+                    "files": project.files,
+                    "total_text_length": project.total_text_length,
+                    "entity_type_count": entity_count,
+                    "edge_type_count": edge_count,
+                })
+                task_logger.info(f"[{task_id}] === 本体生成完成 === 项目ID: {project.project_id}")
+            except Exception as exc:
+                task_logger.error(f"[{task_id}] 本体生成失败: {str(exc)}")
+                task_logger.debug(traceback.format_exc())
+                project.status = ProjectStatus.FAILED
+                project.error = str(exc)
+                try:
+                    ProjectManager.save_project(project)
+                finally:
+                    task_manager.update_task(
+                        task_id,
+                        status=TaskStatus.FAILED,
+                        progress=100,
+                        message=f"Ontology generation failed: {exc}",
+                        error=traceback.format_exc()
+                    )
+
+        thread = threading.Thread(target=ontology_task, daemon=True)
+        thread.start()
+
         return jsonify({
             "success": True,
             "data": {
                 "project_id": project.project_id,
                 "project_name": project.name,
-                "ontology": project.ontology,
-                "analysis_summary": project.analysis_summary,
+                "task_id": task_id,
+                "status": project.status.value,
                 "files": project.files,
-                "total_text_length": project.total_text_length
+                "total_text_length": project.total_text_length,
+                "message": "Ontology generation started. Check progress via /task/{task_id}"
             }
         })
         
@@ -372,7 +433,13 @@ def build_graph():
         
         # 创建异步任务
         task_manager = TaskManager()
-        task_id = task_manager.create_task(f"构建图谱: {graph_name}")
+        task_id = task_manager.create_task(
+            f"构建图谱: {graph_name}",
+            metadata={
+                "project_id": project_id,
+                "stage": "graph_build",
+            },
+        )
         logger.info(f"创建图谱构建任务: task_id={task_id}, project_id={project_id}")
         
         # 更新项目状态
