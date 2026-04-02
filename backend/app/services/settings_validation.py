@@ -97,9 +97,9 @@ def validate_zep_api_key(api_key: str) -> None:
         raise SettingsValidationError('Zep API key is required for validation.', field='zep_api_key')
 
     request = urllib.request.Request(
-        'https://api.getzep.com/api/v2/graph',
+        'https://api.getzep.com/api/v2/graph/list-all',
         headers={
-            'Authorization': f'Bearer {api_key}',
+            'Authorization': f'Api-Key {api_key}',
             'Accept': 'application/json',
             'User-Agent': 'MiroFish Settings Validation',
         },
