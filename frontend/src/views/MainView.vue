@@ -108,6 +108,7 @@ const systemLogs = ref([])
 // Polling timers
 let pollTimer = null
 let graphPollTimer = null
+let buildStartInFlight = false
 
 // --- Computed Layout Styles ---
 const leftPanelStyle = computed(() => {
@@ -294,12 +295,59 @@ const handleProjectFailure = (project) => {
 }
 
 const startBuildGraph = async () => {
+  if (buildStartInFlight) {
+    return
+  }
+
   try {
+    buildStartInFlight = true
+    const projectRes = await getProject(currentProjectId.value)
+    if (!projectRes.success) {
+      throw new Error(projectRes.error || 'Failed to refresh project state before graph build')
+    }
+
+    projectData.value = projectRes.data
+
+    if (projectRes.data.status === 'graph_building' && projectRes.data.graph_build_task_id) {
+      currentPhase.value = 1
+      buildProgress.value = { progress: 0, message: 'Graph build already running...' }
+      addLog(`Graph build already running. Task ID: ${projectRes.data.graph_build_task_id}`)
+      startGraphPolling()
+      startPollingTask(projectRes.data.graph_build_task_id)
+      return
+    }
+
+    if (projectRes.data.status === 'graph_completed' && projectRes.data.graph_id) {
+      currentPhase.value = 2
+      addLog('Graph already built. Loading graph data...')
+      await loadGraph(projectRes.data.graph_id)
+      return
+    }
+
+    if (projectRes.data.status === 'ontology_generating') {
+      currentPhase.value = 0
+      ontologyProgress.value = {
+        progress: 35,
+        message: 'Ontology generation still running. Waiting before graph build...'
+      }
+      addLog('Skipped premature graph build request because ontology is still running.')
+      if (projectRes.data.ontology_task_id) {
+        startPollingTask(projectRes.data.ontology_task_id)
+      }
+      return
+    }
+
+    if (projectRes.data.status !== 'ontology_generated') {
+      addLog(`Skipped graph build because project status is ${projectRes.data.status}.`)
+      return
+    }
+
     currentPhase.value = 1
     buildProgress.value = { progress: 0, message: 'Starting build...' }
     ontologyProgress.value = null
+    error.value = ''
     addLog('Initiating graph build...')
-    
+
     const res = await buildGraph({ project_id: currentProjectId.value })
     if (res.success) {
       addLog(`Graph build task started. Task ID: ${res.data.task_id}`)
@@ -312,6 +360,8 @@ const startBuildGraph = async () => {
   } catch (err) {
     error.value = err.message
     addLog(`Exception in startBuildGraph: ${err.message}`)
+  } finally {
+    buildStartInFlight = false
   }
 }
 
