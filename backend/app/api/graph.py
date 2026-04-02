@@ -476,12 +476,31 @@ def build_graph():
                     message="Chunking source documents...",
                     progress=5
                 )
+                effective_chunk_size = chunk_size
+                effective_chunk_overlap = chunk_overlap
+
+                # Free-plan Zep rate limits are too tight for hundreds of tiny chunks.
+                # If the caller did not explicitly request custom chunking, coarsen large builds.
+                if (
+                    chunk_size == Config.DEFAULT_CHUNK_SIZE
+                    and chunk_overlap == Config.DEFAULT_CHUNK_OVERLAP
+                    and len(text) > 100_000
+                ):
+                    effective_chunk_size = 2500
+                    effective_chunk_overlap = 200
+                    task_manager.update_task(
+                        task_id,
+                        message="Large document set detected. Increasing chunk size to reduce Zep request volume...",
+                        progress=4,
+                    )
+
                 chunks = TextProcessor.split_text(
                     text, 
-                    chunk_size=chunk_size, 
-                    overlap=chunk_overlap
+                    chunk_size=effective_chunk_size, 
+                    overlap=effective_chunk_overlap
                 )
                 total_chunks = len(chunks)
+                batch_size = 25 if total_chunks > 80 else 12 if total_chunks > 30 else 3
                 
                 # 创建图谱
                 task_manager.update_task(
@@ -521,7 +540,7 @@ def build_graph():
                 episode_uuids = builder.add_text_batches(
                     graph_id, 
                     chunks,
-                    batch_size=3,
+                    batch_size=batch_size,
                     progress_callback=add_progress_callback
                 )
                 

@@ -304,7 +304,7 @@ class GraphBuilderService:
             if progress_callback:
                 progress = (i + len(batch_chunks)) / total_chunks
                 progress_callback(
-                    f"发送第 {batch_num}/{total_batches} 批数据 ({len(batch_chunks)} 块)...",
+                    f"Uploading batch {batch_num}/{total_batches} ({len(batch_chunks)} chunks)...",
                     progress
                 )
             
@@ -333,7 +333,7 @@ class GraphBuilderService:
                 
             except Exception as e:
                 if progress_callback:
-                    progress_callback(f"批次 {batch_num} 发送失败: {str(e)}", 0)
+                    progress_callback(f"Batch {batch_num} failed: {str(e)}", 0)
                 raise
         
         return episode_uuids
@@ -347,7 +347,7 @@ class GraphBuilderService:
         """等待所有 episode 处理完成（通过查询每个 episode 的 processed 状态）"""
         if not episode_uuids:
             if progress_callback:
-                progress_callback("无需等待（没有 episode）", 1.0)
+                progress_callback("No processing wait needed.", 1.0)
             return
         
         start_time = time.time()
@@ -356,7 +356,28 @@ class GraphBuilderService:
         total_episodes = len(episode_uuids)
         
         if progress_callback:
-            progress_callback(f"开始等待 {total_episodes} 个文本块处理...", 0)
+            progress_callback(f"Waiting for {total_episodes} chunks to finish processing...", 0)
+
+        # On large builds, per-episode polling can exceed Zep FREE plan limits by itself.
+        if total_episodes > 40:
+            estimated_wait = min(timeout, max(45, total_episodes))
+            step = 15
+            elapsed = 0
+            while elapsed < estimated_wait:
+                if progress_callback:
+                    progress_callback(
+                        f"Large build detected. Waiting for Zep to process chunks in low-request mode ({elapsed}s/{estimated_wait}s)...",
+                        min(elapsed / estimated_wait, 0.95),
+                    )
+                time.sleep(step)
+                elapsed += step
+
+            if progress_callback:
+                progress_callback(
+                    "Low-request wait window finished. Proceeding to graph fetch.",
+                    1.0,
+                )
+            return
         
         while pending_episodes:
             if time.time() - start_time > timeout:
