@@ -1,18 +1,21 @@
-"""
-LLM客户端封装
-统一使用OpenAI格式调用
-"""
+"""LLM client wrapper for OpenAI-compatible providers."""
 
 import json
+import logging
 import re
+import time
 from typing import Optional, Dict, Any, List
 from openai import OpenAI
 
 from ..config import Config
 
+logger = logging.getLogger(__name__)
+
 
 class LLMClient:
     """LLM客户端"""
+    CHAT_JSON_MAX_RETRIES = 3
+    CHAT_JSON_RETRY_DELAY_SECONDS = 3
     
     def __init__(
         self,
@@ -84,20 +87,36 @@ class LLMClient:
         Returns:
             解析后的JSON对象
         """
-        response = self.chat(
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"}
-        )
-        # 清理markdown代码块标记
-        cleaned_response = response.strip()
-        cleaned_response = re.sub(r'^```(?:json)?\s*\n?', '', cleaned_response, flags=re.IGNORECASE)
-        cleaned_response = re.sub(r'\n?```\s*$', '', cleaned_response)
-        cleaned_response = cleaned_response.strip()
+        last_error: Optional[Exception] = None
 
-        try:
-            return json.loads(cleaned_response)
-        except json.JSONDecodeError:
-            raise ValueError(f"LLM返回的JSON格式无效: {cleaned_response}")
+        for attempt in range(1, self.CHAT_JSON_MAX_RETRIES + 1):
+            try:
+                response = self.chat(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_format={"type": "json_object"}
+                )
+                # 清理markdown代码块标记
+                cleaned_response = response.strip()
+                cleaned_response = re.sub(r'^```(?:json)?\s*\n?', '', cleaned_response, flags=re.IGNORECASE)
+                cleaned_response = re.sub(r'\n?```\s*$', '', cleaned_response)
+                cleaned_response = cleaned_response.strip()
+                return json.loads(cleaned_response)
+            except Exception as exc:
+                last_error = exc
+                if attempt >= self.CHAT_JSON_MAX_RETRIES:
+                    break
+                logger.warning(
+                    "chat_json attempt %s/%s failed: %s",
+                    attempt,
+                    self.CHAT_JSON_MAX_RETRIES,
+                    exc,
+                )
+                time.sleep(self.CHAT_JSON_RETRY_DELAY_SECONDS * attempt)
 
+        if isinstance(last_error, json.JSONDecodeError):
+            raise ValueError(f"LLM返回的JSON格式无效: {last_error}")
+        if last_error:
+            raise last_error
+        raise ValueError("LLM返回的JSON格式无效")

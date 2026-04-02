@@ -146,6 +146,7 @@ def generate_ontology():
             }
         }
     """
+    project = None
     try:
         logger.info("=== 开始生成本体定义 ===")
         
@@ -209,6 +210,7 @@ def generate_ontology():
         # 保存提取的文本
         project.total_text_length = len(all_text)
         ProjectManager.save_extracted_text(project.project_id, all_text)
+        ProjectManager.save_project(project)
         logger.info(f"文本提取完成，共 {len(all_text)} 字符")
         
         # 生成本体
@@ -247,9 +249,17 @@ def generate_ontology():
         })
         
     except Exception as e:
+        if project is not None:
+            project.status = ProjectStatus.FAILED
+            project.error = str(e)
+            try:
+                ProjectManager.save_project(project)
+            except Exception:
+                logger.exception("Failed to persist failed ontology project state")
         return jsonify({
             "success": False,
             "error": str(e),
+            "project_id": project.project_id if project is not None else None,
             "traceback": traceback.format_exc()
         }), 500
 
