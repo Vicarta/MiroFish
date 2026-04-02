@@ -31,6 +31,32 @@ def _is_zep_rate_limit(exc: Exception) -> bool:
     return 'status_code: 429' in text or 'rate limit exceeded' in text
 
 
+def _normalize_graph_build_error(exc: Exception) -> str:
+    """Convert raw backend/Zep exceptions into concise user-facing errors."""
+    message = str(exc)
+    lowered = message.lower()
+
+    if _is_zep_rate_limit(exc):
+        return (
+            "Zep FREE plan rate limit was exceeded during GraphRAG build. "
+            "Wait for the cooldown window and retry."
+        )
+
+    if "episodes cannot contain more than 20 items" in lowered:
+        return (
+            "GraphRAG build sent a batch larger than Zep allows. "
+            "The server has been updated; retry the graph build."
+        )
+
+    if "status_code: 401" in lowered and "unauthorized" in lowered:
+        return (
+            "Zep rejected the GraphRAG build request with 401 unauthorized. "
+            "Update ZEP_API_KEY in Settings and retry."
+        )
+
+    return message
+
+
 def allowed_file(filename: str) -> bool:
     """检查文件扩展名是否允许"""
     if not filename or '.' not in filename:
@@ -500,7 +526,7 @@ def build_graph():
                     overlap=effective_chunk_overlap
                 )
                 total_chunks = len(chunks)
-                batch_size = 25 if total_chunks > 80 else 12 if total_chunks > 30 else 3
+                batch_size = 20 if total_chunks > 80 else 12 if total_chunks > 30 else 3
                 
                 # 创建图谱
                 task_manager.update_task(
@@ -592,7 +618,10 @@ def build_graph():
                 
                 node_count = graph_data.get("node_count", 0)
                 edge_count = graph_data.get("edge_count", 0)
-                build_logger.info(f"[{task_id}] 图谱构建完成: graph_id={graph_id}, 节点={node_count}, 边={edge_count}")
+                build_logger.info(
+                    f"[{task_id}] Graph build completed: graph_id={graph_id}, "
+                    f"nodes={node_count}, edges={edge_count}"
+                )
                 
                 # 完成
                 task_manager.update_task(
@@ -616,28 +645,24 @@ def build_graph():
                 
             except Exception as e:
                 # 更新项目状态为失败
-                build_logger.error(f"[{task_id}] 图谱构建失败: {str(e)}")
+                build_logger.error(f"[{task_id}] Graph build failed: {str(e)}")
                 build_logger.debug(traceback.format_exc())
                 
                 project.status = ProjectStatus.FAILED
-                if _is_zep_rate_limit(e):
-                    project.error = (
-                        "Zep rate limit exceeded on the FREE plan during GraphRAG build. "
-                        "Wait for the cooldown shown by Zep and retry the graph build."
-                    )
-                else:
-                    project.error = str(e)
+                normalized_error = _normalize_graph_build_error(e)
+                project.error = normalized_error
                 ProjectManager.save_project(project)
                 
                 task_manager.update_task(
                     task_id,
                     status=TaskStatus.FAILED,
-                    message=(
-                        "GraphRAG build failed because Zep rate limit was exceeded."
-                        if _is_zep_rate_limit(e)
-                        else f"GraphRAG build failed: {str(e)}"
-                    ),
-                    error=traceback.format_exc()
+                    message=f"GraphRAG build failed: {normalized_error}",
+                    error=normalized_error,
+                    metadata={
+                        "project_id": project_id,
+                        "stage": "graph_build",
+                        "debug_error": traceback.format_exc(),
+                    }
                 )
         
         # 启动后台线程

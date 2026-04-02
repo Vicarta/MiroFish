@@ -808,13 +808,13 @@ const pollTaskStatus = async (taskId) => {
       // 更新进度显示
       buildProgress.value = {
         progress: task.progress || 0,
-        message: task.message || '处理中...'
+        message: task.message || 'Processing...'
       }
       
       console.log('Task status:', task.status, 'Progress:', task.progress)
       
       if (task.status === 'completed') {
-        console.log('✅ Graph Build完成，正在加载完整数据...')
+        console.log('✅ Graph build completed, loading final graph data...')
         
         stopPolling()
         stopGraphPolling()
@@ -823,7 +823,7 @@ const pollTaskStatus = async (taskId) => {
         // 更新进度显示为完成状态
         buildProgress.value = {
           progress: 100,
-          message: 'Build Complete，正在加载Graph...'
+          message: 'Build complete, loading graph...'
         }
         
         // 重新加载项目数据获取 graph_id
@@ -833,9 +833,9 @@ const pollTaskStatus = async (taskId) => {
           
           // 最终加载完整Graph数据
           if (projectResponse.data.graph_id) {
-            console.log('📊 加载完整Graph:', projectResponse.data.graph_id)
+            console.log('📊 Loading full graph:', projectResponse.data.graph_id)
             await loadGraph(projectResponse.data.graph_id)
-            console.log('✅ Graph加载完成')
+            console.log('✅ Graph loaded')
           }
         }
         
@@ -844,7 +844,7 @@ const pollTaskStatus = async (taskId) => {
       } else if (task.status === 'failed') {
         stopPolling()
         stopGraphPolling()
-        error.value = 'Graph Build失败: ' + (task.error || 'Unknown error')
+        error.value = 'Graph build failed: ' + (task.error || 'Unknown error')
         buildProgress.value = null
       }
     }
